@@ -10,8 +10,7 @@
 
 static p101_fsm_state_t init_state(const struct p101_env *env, struct p101_error *err, void *arg);
 static p101_fsm_state_t connect_state(const struct p101_env *env, struct p101_error *err, void *arg);
-static p101_fsm_state_t send_state(const struct p101_env *env, struct p101_error *err, void *arg);
-static p101_fsm_state_t receive_state(const struct p101_env *env, struct p101_error *err, void *arg);
+static p101_fsm_state_t process_state(const struct p101_env *env, struct p101_error *err, void *arg);
 static p101_fsm_state_t cleanup_state(const struct p101_env *env, struct p101_error *err, void *arg);
 static p101_fsm_state_t error_state(const struct p101_env *env, struct p101_error *err, void *arg);
 
@@ -19,8 +18,7 @@ enum client_states
 {
     INIT = P101_FSM_USER_START,
     CONNECT,
-    SEND,
-    RECEIVE,
+    PROCESS,
     CLEANUP,
     ERROR,
 };
@@ -58,12 +56,10 @@ int main(void)
             {P101_FSM_INIT, INIT,          init_state   },
             {INIT,          CONNECT,       connect_state},
             {INIT,          ERROR,         error_state  },
-            {CONNECT,       SEND,          send_state   },
+            {CONNECT,       PROCESS,       process_state},
             {CONNECT,       ERROR,         error_state  },
-            {SEND,          RECEIVE,       receive_state},
-            {SEND,          ERROR,         error_state  },
-            {RECEIVE,       CLEANUP,       cleanup_state},
-            {RECEIVE,       ERROR,         error_state  },
+            {PROCESS,       CLEANUP,       cleanup_state},
+            {PROCESS,       ERROR,         error_state  },
             {CLEANUP,       P101_FSM_EXIT, NULL         },
             {ERROR,         P101_FSM_EXIT, NULL         },
         };
@@ -117,34 +113,28 @@ static p101_fsm_state_t connect_state(const struct p101_env *env, struct p101_er
         return ERROR;
     }
 
-    return SEND;
+    return PROCESS;
 }
 
-static p101_fsm_state_t send_state(const struct p101_env *env, struct p101_error *err, void *arg)
+static p101_fsm_state_t process_state(const struct p101_env *env, struct p101_error *err, void *arg)
 {
     const struct client_context *ctx;
     const char                  *message;
+    char                        *buffer;
+    ssize_t                      bytes_read;
+    p101_fsm_state_t             next_state;
 
     ctx     = (struct client_context *)arg;
+    buffer  = NULL;
     message = "Hello, World!!";
     p101_write(env, err, ctx->client_socket, message, strlen(message));
 
     if(p101_error_has_error(err))
     {
-        return ERROR;
+        next_state = ERROR;
+        goto done;
     }
 
-    return RECEIVE;
-}
-
-static p101_fsm_state_t receive_state(const struct p101_env *env, struct p101_error *err, void *arg)
-{
-    const struct client_context *ctx;
-    char                        *buffer;
-    ssize_t                      bytes_read;
-    p101_fsm_state_t             next_state;
-
-    ctx        = (struct client_context *)arg;
     buffer     = (char *)p101_malloc(env, err, buffer_size * sizeof(buffer[0]));
     bytes_read = p101_read(env, err, ctx->client_socket, buffer, buffer_size - 1);
 
@@ -158,7 +148,10 @@ static p101_fsm_state_t receive_state(const struct p101_env *env, struct p101_er
     printf("Received: %s\n", buffer);
     next_state = CLEANUP;
 done:
-    p101_free(env, buffer);
+    if(buffer != NULL)
+    {
+        p101_free(env, buffer);
+    }
 
     return next_state;
 }
